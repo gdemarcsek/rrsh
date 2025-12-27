@@ -36,7 +36,7 @@ impl Encoder<Vec<u8>> for EncryptedCodec {
         let ciphertext = self
             .cipher
             .encrypt(&nonce, item.as_ref())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Encryption failed"))?;
+            .map_err(|_| std::io::Error::other("Encryption failed"))?;
 
         // Write Length (u16) + Ciphertext
         dst.put_u16(ciphertext.len() as u16);
