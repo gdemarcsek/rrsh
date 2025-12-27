@@ -1,2 +1,0 @@
-[alias]
-ci = ["!cargo fmt -- --check && cargo clippy -- -D warnings && cargo test && cargo geiger && cargo audit && cargo build --release"]

