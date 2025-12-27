@@ -1,0 +1,57 @@
+[package]
+name = "chacha20"
+version = "0.10.0-rc.6"
+authors = ["RustCrypto Developers"]
+edition = "2024"
+rust-version = "1.85"
+documentation = "https://docs.rs/chacha20"
+readme = "README.md"
+repository = "https://github.com/RustCrypto/stream-ciphers"
+license = "MIT OR Apache-2.0"
+keywords = ["crypto", "stream-cipher", "chacha8", "chacha12", "xchacha20"]
+categories = ["cryptography", "no-std"]
+description = """
+The ChaCha20 stream cipher (RFC 8439) implemented in pure Rust using traits
+from the RustCrypto `cipher` crate, with optional architecture-specific
+hardware acceleration (AVX2, SSE2). Additionally provides the ChaCha8, ChaCha12,
+XChaCha20, XChaCha12 and XChaCha8 stream ciphers, and also optional
+rand_core-compatible RNGs based on those ciphers.
+"""
+
+[dependencies]
+cfg-if = "1"
+cipher = { version = "0.5.0-rc.2", optional = true, features = ["stream-wrapper"] }
+rand_core = { version = "0.10.0-rc-3", optional = true, default-features = false }
+
+# `zeroize` is an explicit dependency because this crate may be used without the `cipher` crate
+zeroize = { version = "1.8.1", optional = true, default-features = false }
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "x86"))'.dependencies]
+cpufeatures = "0.2"
+
+[dev-dependencies]
+cipher = { version = "0.5.0-rc.2", features = ["dev"] }
+hex-literal = "1"
+proptest = "1"
+rand_chacha = "0.9"
+
+[features]
+default = ["cipher"]
+legacy = ["cipher"]
+rng = ["rand_core"]
+xchacha = ["cipher"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+    'cfg(chacha20_force_soft)',
+    'cfg(chacha20_force_sse2)',
+    'cfg(chacha20_force_avx2)',
+]
+
+[lints.clippy]
+needless_range_loop = "allow"
