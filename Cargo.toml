@@ -13,6 +13,16 @@ tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 futures = "0.3.31"
 crossterm = "0.27"
+obfstr = "0.4"
+hkdf = "0.12"
+sha2 = "0.10"
 
 [patch.crates-io]
 chacha20 = { path = "./crypto_vendor/stream-ciphers/chacha20" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

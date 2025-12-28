@@ -28,7 +28,7 @@ fn make_nonce(counter: u64) -> Nonce {
 
 impl Encoder<Vec<u8>> for EncryptedCodec {
     type Error = std::io::Error;
-
+    // WARNING: We are using repeatable nonces so the protocol needs two distinct keys for each direction of comms!
     fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let nonce = make_nonce(self.nonce_counter);
         self.nonce_counter += 1;
@@ -36,7 +36,7 @@ impl Encoder<Vec<u8>> for EncryptedCodec {
         let ciphertext = self
             .cipher
             .encrypt(&nonce, item.as_ref())
-            .map_err(|_| std::io::Error::other("Encryption failed"))?;
+            .map_err(|_| std::io::Error::other("enc failed"))?;
 
         // Write Length (u16) + Ciphertext
         dst.put_u16(ciphertext.len() as u16);
@@ -68,7 +68,7 @@ impl Decoder for EncryptedCodec {
         self.nonce_counter += 1;
 
         let plaintext = self.cipher.decrypt(&nonce, data.as_ref()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "Auth Tag Failed!")
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "auth tag failed")
         })?;
 
         Ok(Some(plaintext))
