@@ -43,7 +43,7 @@ where
     let mut info = Vec::from(obfstr!("hkdfrsh"));
     info.extend_from_slice(secret_auth.as_bytes());
     hkdf.expand(&info, &mut okm)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "hkdf errror"))?;
+        .map_err(|_| std::io::Error::other( "hkdf errror"))?;
     let (key_tx, key_rx) = okm.split_at(32);
 
     Ok((key_tx.try_into().unwrap(), key_rx.try_into().unwrap()))
