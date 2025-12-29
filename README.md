@@ -12,9 +12,18 @@ Features implemented:
 - [*] Minimalistic, custom encrypted channel (modified ChaCha20Poly1305 with 2DH handshake protocol over ECDH)
 - [*] Async networking using Tokio
 - [*] Some super basic stealth for its Rust practice value, nothing more
-- [*] Linux and Mac support (no Windows support yet!)
 
 NOTE: Windows and Linux support are not tested.
+
+## Architecture
+
+rrsh uses a custom encrypted transport layer to evade standard network signatures:
+
+1. **Handshake:** ECDH (X25519) key exchange to derive a shared secret.
+2. **KDF:** HKDF-SHA256 to derive distinct Tx/Rx keys.
+3. **Transport:** ChaCha20Poly1305 with stateful nonces (preventing replay attacks).
+4. **Encoding:** Custom length-prefixed framing (Big Endian u16).
+5. **I/O**: Tokio-based async I/O and cross-platform PTY management for interactive shell support.
 
 ## Building
 
@@ -51,6 +60,8 @@ Listener: `cargo run --bin listener --release`
 
 ## Detection
 
+This is a personal learning project but indeed, someone might misuse it since it's public so I also publish a Yara rule with it to detect naive uses:
+
 ```
 rule Rust_Reverse_Shell {
     strings:
@@ -71,11 +82,12 @@ rule Rust_Reverse_Shell {
         $aead_string = "auth tag failed"
 
     condition:
-        4 of them and filesize > 200KB 
+        (uint16(0) == 0x5A4D or uint32(0) == 0xFEEDFACF or uint32(0) == 0x464C457F) and
+        4 of them and filesize > 200KB
 }
 ```
 
-VT submissions:
+Also submitted to VT:
 
  - https://www.virustotal.com/gui/file/78407d5f91f824972d26bc371b522b5a1527135a964411ee65df8aeee5ed8adb
  - https://www.virustotal.com/gui/file/65f8e7637d2c2ef79ba861d9a650f7f40d514b103aa16019d7aca5147c366b82
