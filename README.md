@@ -8,10 +8,10 @@ DISCLAIMER: This project is for educational purposes and authorized security tes
 
 Features implemented:
 
-- [*] "Upgraded" (pty) shell (NOTE: some features are lacking, for example proper support for window resize)
-- [*] Minimalistic, custom encrypted channel (modified ChaCha20Poly1305 with 2DH handshake protocol over ECDH)
-- [*] Async networking using Tokio
-- [*] Some super basic stealth for its Rust practice value, nothing more
+- "Upgraded" (pty) shell (NOTE: some features are lacking, for example proper support for window resize)
+- Minimalistic, custom encrypted channel (modified ChaCha20Poly1305 with 2DH handshake protocol over ECDH)
+- Async networking using Tokio
+- Some super basic stealth for its Rust practice value, nothing more
 
 NOTE: Windows and Linux support are not tested.
 
