@@ -1,9 +1,9 @@
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 #[path = "../codec.rs"]
 mod codec;
