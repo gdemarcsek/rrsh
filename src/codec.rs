@@ -29,7 +29,7 @@ impl Encoder<Vec<u8>> for EncryptedCodec {
     type Error = std::io::Error;
     // WARNING: We are using repeatable nonces so the protocol needs two distinct keys for each direction of comms!
     fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        if item.len() == 0 {
+        if item.is_empty() {
             return Ok(());
         }
 
