@@ -3,8 +3,6 @@ use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
-
-// Terminal Handling
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 #[path = "../codec.rs"]
