@@ -1,5 +1,5 @@
-use x25519_dalek::{StaticSecret, PublicKey};
 use rand_core::OsRng;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 fn main() {
     let server_secret = StaticSecret::random_from_rng(OsRng);
@@ -8,4 +8,3 @@ fn main() {
     println!("Server Private: {:?}", server_secret.to_bytes());
     println!("Server Public: {:?}", server_public.as_bytes());
 }
-

