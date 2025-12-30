@@ -3,13 +3,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-#[path = "../codec.rs"]
-mod codec;
-use codec::EncryptedCodec;
-
-use rrsh::{HandshakeRole, do_handshake};
+use rrsh::{
+    HandshakeRole, codec::EncryptedCodec, do_handshake, proto::Message, proto::ProtocolCodec,
+};
 
 struct RawModeGuard;
 
@@ -28,7 +27,7 @@ impl Drop for RawModeGuard {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("0.0.0.0:4444").await?;
     let server_role = rrsh::HandshakeRole::Server {
@@ -66,21 +65,44 @@ async fn handle_session(
     let _guard = RawModeGuard::new()?;
 
     let (raw_reader, raw_writer) = socket.split();
-    let mut frame_reader = FramedRead::new(raw_reader, EncryptedCodec::new(cipher_rx));
-    let mut frame_writer = FramedWrite::new(raw_writer, EncryptedCodec::new(cipher_tx));
+    let mut frame_reader = FramedRead::new(
+        raw_reader,
+        ProtocolCodec::new(EncryptedCodec::new(cipher_rx)),
+    );
+    let mut frame_writer = FramedWrite::new(
+        raw_writer,
+        ProtocolCodec::new(EncryptedCodec::new(cipher_tx)),
+    );
 
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let mut stdin_buf = [0u8; 4096];
 
+    let mut window_change_events = signal(SignalKind::window_change())?;
+
+    frame_writer
+        .send(Message::Resize {
+            rows: crossterm::terminal::size()?.1,
+            cols: crossterm::terminal::size()?.0,
+        })
+        .await?;
+
     loop {
         tokio::select! {
             Some(result) = frame_reader.next() => {
                 match result {
-                    Ok(data) => {
+                    Ok(Message::PtyData(data)) => {
                         stdout.write_all(&data).await?;
                         stdout.flush().await?;
                     }
+                    Ok(Message::Exit) => {
+                        println!("\r\n[!] Remote side exited the session.");
+                        break;
+                    }
+                    Ok(Message::Heartbeat) => {
+                        frame_writer.send(Message::Heartbeat).await?;
+                    }
+                    Ok(_) => {}
                     Err(e) => return Err(format!("network error: {}", e).into()),
                 }
             }
@@ -88,7 +110,14 @@ async fn handle_session(
             Ok(n) = stdin.read(&mut stdin_buf) => {
                 if n == 0 { break; }
                 let data = stdin_buf[..n].to_vec();
-                frame_writer.send(data).await?;
+                frame_writer.send(Message::PtyData(data)).await?;
+            }
+
+            _ = window_change_events.recv() => {
+                frame_writer.send(Message::Resize {
+                    rows: crossterm::terminal::size()?.1,
+                    cols: crossterm::terminal::size()?.0,
+                }).await?;
             }
 
             else => break

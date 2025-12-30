@@ -4,6 +4,9 @@ use sha2::Sha256;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use x25519_dalek::{PublicKey, StaticSecret};
 
+pub mod codec;
+pub mod proto;
+
 pub type ReadKey = [u8; 32];
 pub type WriteKey = [u8; 32];
 
