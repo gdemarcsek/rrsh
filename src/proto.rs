@@ -93,3 +93,34 @@ impl Decoder for ProtocolCodec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+    use proptest::prelude::*;
+    use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+    use tokio_util::codec::{Decoder, Encoder};
+
+    proptest! {
+        #[test]
+        fn test_protocol_codec_roundtrip(msg in prop_oneof![
+            any::<Vec<u8>>().prop_map(Message::PtyData),
+            (1u16..1000, 1u16..1000).prop_map(|(r, c)| Message::Resize { rows: r, cols: c }),
+            Just(Message::Heartbeat),
+            Just(Message::Exit),
+        ]) {
+            let encrypted_codec_tx = EncryptedCodec::new(ChaCha20Poly1305::new(&[0u8; 32].into()));
+            let encrypted_codec_rx = EncryptedCodec::new(ChaCha20Poly1305::new(&[0u8; 32].into()));
+            let mut protocol_codec_tx = ProtocolCodec::new(encrypted_codec_tx);
+            let mut protocol_codec_rx = ProtocolCodec::new(encrypted_codec_rx);
+
+            let mut buf = BytesMut::new();
+            protocol_codec_tx.encode(msg.clone(), &mut buf).unwrap();
+
+            let decoded_msg = protocol_codec_rx.decode(&mut buf).unwrap().unwrap();
+
+            assert_eq!(msg, decoded_msg);
+        }
+    }
+}
