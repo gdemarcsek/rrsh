@@ -98,7 +98,7 @@ Also submitted to VT:
 Some future items - mostly for myself to continue practicing:
 
  - [x] (small) Avoid zombies in case the parent process dies before the shell exits (cool practice for RAII and Drop trait)
- - [ ] (medium) Handle window resize (cool practice for more byte manipulation and PTY trickery)
+ - [x] (medium) Handle window resize (cool practice for more byte manipulation and PTY trickery)
  - [ ] (large) In the listener, support multiple concurrent sessions (cool practice for state, concurrency, collections, iterators)
  - [ ] (medium) Add heartbeats perhaps (with randomized intervals and message sizes)
  - [ ] (large) Add file transfers
