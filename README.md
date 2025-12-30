@@ -93,3 +93,13 @@ Also submitted to VT:
  - https://www.virustotal.com/gui/file/65f8e7637d2c2ef79ba861d9a650f7f40d514b103aa16019d7aca5147c366b82
  - https://www.virustotal.com/gui/file/b950b6ce403ceb7ebd12b6a6aea5382b7d63a0696ebb155d8471ea39f95f593a
 
+## Roadmap
+
+Some future items - mostly for myself to continue practicing:
+
+ - [x] (small) Avoid zombies in case the parent process dies before the shell exits (cool practice for RAII and Drop trait)
+ - [ ] (medium) Handle window resize (cool practice for more byte manipulation and PTY trickery)
+ - [ ] (large) In the listener, support multiple concurrent sessions (cool practice for state, concurrency, collections, iterators)
+ - [ ] (medium) Add heartbeats perhaps (with randomized intervals and message sizes)
+ - [ ] (large) Add file transfers
+ - [ ] (large) Implement a TUI for the listener
