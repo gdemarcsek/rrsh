@@ -20,7 +20,7 @@ chacha20poly1305 = "0.11.0-rc.2"
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 futures = "0.3.31"
-crossterm = "0.27"
+crossterm = { version = "0.27", feautres = ["filedescriptor"] }
 obfstr = "0.4"
 hkdf = "0.12"
 sha2 = "0.10"

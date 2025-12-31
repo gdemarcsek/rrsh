@@ -98,8 +98,8 @@ impl Decoder for ProtocolCodec {
 mod tests {
     use super::*;
     use bytes::BytesMut;
-    use proptest::prelude::*;
     use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+    use proptest::prelude::*;
     use tokio_util::codec::{Decoder, Encoder};
 
     proptest! {
